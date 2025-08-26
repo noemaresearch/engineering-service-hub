@@ -24,9 +24,42 @@ The goal of this process is to create the central identity and trust foundation 
 
 ---
 
+## Step 0: (Recommended) Set Up a Remote State Backend
+
+By default, Pulumi stores your infrastructure state on your local machine. For a foundational project like this, it is highly recommended to use a remote backend to protect the state file and enable collaboration.
+
+These commands will create a dedicated GCP project and a GCS bucket to store your state.
+
+1.  **Create the State Project**:
+    ```bash
+    gcloud projects create global-states --folder=YOUR_NUMERIC_FOLDER_ID
+    ```
+    *(Replace `YOUR_NUMERIC_FOLDER_ID` with the ID of the folder where you want to place this project, e.g., your `engineering-platform` folder ID).*
+
+2.  **Set Your Active Project**:
+    ```bash
+    gcloud config set project global-states
+    ```
+
+3.  **Create the GCS Bucket**:
+    *Note: GCS bucket names must be globally unique. You may need to change this name slightly.*
+    ```bash
+    gsutil mb -p global-states gs://global-pulumi-state-bucket
+    ```
+
+4.  **Enable Versioning (Recommended)**:
+    This protects against accidental state deletion or corruption.
+    ```bash
+    gsutil versioning set on gs://global-pulumi-state-bucket
+    ```
+
+You will use this bucket name later when you log in to Pulumi.
+
+---
+
 ## Step 1: Authenticate with Google Cloud
 
-Ensure your local `gcloud` CLI is authenticated with the highly-privileged user account.
+Ensure your local `gcloud` CLI is authenticated with the highly-privileged user account. This may require you to re-run these commands to target the new `global-states` project if you just created it.
 
 ```bash
 gcloud auth login
@@ -74,7 +107,12 @@ config:
     ```
 
 3.  **Log in to Pulumi**:
-    Follow the prompts to log in to your desired Pulumi backend. For local state, you can use `pulumi login --local`. For a GCS backend, use `pulumi login gs://<your-pulumi-state-bucket>`.
+    Follow the prompts to log in to your desired Pulumi backend. For local state, you can use `pulumi login --local`. 
+
+    **To use the GCS backend you just created, run:**
+    ```bash
+    pulumi login gs://global-pulumi-state-bucket
+    ```
 
 ## Step 5: Deploy the Hub Infrastructure
 
@@ -106,3 +144,26 @@ You will use these values to set the following secrets in the GitHub repositorie
 *   `GCP_BOOTSTRAP_WIF_PROVIDER`: The `workload_identity_provider_name` output.
 
 **Bootstrap is now complete.** Your platform's identity hub is live, and your CI/CD pipelines can now run in a fully-automated and secure manner.
+
+---
+
+## Troubleshooting
+
+### `pulumi login` Fails with `oauth2: "invalid_grant"`
+
+If you see an error similar to this when running `pulumi login gs://...`:
+
+```
+error: problem logging in: read ".pulumi/meta.yaml": blob (key ".pulumi/meta.yaml") (code=Unknown): Get "...": oauth2: "invalid_grant" "reauth related error (invalid_rapt)"
+```
+
+This is **not** a Pulumi error. It means your local Google Cloud authentication token has expired.
+
+**Solution:** Refresh your `gcloud` credentials by re-running the authentication commands:
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+```
+
+After completing the browser login, try the `pulumi login` command again. It should now succeed.

@@ -1,5 +1,6 @@
 config:
-  gcp:project: engineering-service-hub # The ID of the project to be created or managed
-  engineering-service-hub:billing_account_id: YOUR_GCP_BILLING_ACCOUNT_ID # Replace with your actual billing account ID
-  engineering-service-hub:folder_id: YOUR_GCP_FOLDER_ID # Replace with the Folder ID where the hub project will be created
-  engineering-service-hub:github_org: your-github-organization # Replace with your GitHub org name
+  engineering-service-hub:gcp_project: engineering-service-hub # The ID of the project to be created
+  engineering-service-hub:billing_account_id: 01D2DD-61D2EA-235A62 # The billing account to associate with the project
+  engineering-service-hub:folder_id: '128277073508' # The numeric ID of the parent folder
+  engineering-service-hub:github_org: noemaresearch
+encryptionsalt: v1:2fxrxhv0Ya8=:v1:2YvayjBPxZHVPrze:DXmerh+aeQOg3QIgdm3u3K4KDrjBaQ==

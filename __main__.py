@@ -15,25 +15,20 @@ folder_id = config.require("folder_id")
 github_org = config.require("github_org")
 
 # --- Resource Naming ---
-bootstrap_sa_id = "org-cicd-bootstrap-sa"
+bootstrap_sa_id = "engineering-service-org-sa"
 wif_pool_id = "github-pool"
 wif_provider_id = "github-provider"
 
-# --- 1. Create the Hub GCP Project ---
+# --- 1. Create the Hub GCP Project & Link to Billing ---
+# The billing_account is specified directly during project creation.
 hub_project = gcp.organizations.Project("hub-project",
     project_id=hub_project_id,
     name="Engineering Service Hub",
     folder_id=folder_id,
+    billing_account=billing_account_id
 )
 
-# --- 2. Link Project to Billing Account ---
-project_billing = gcp.billing.ProjectBillingInfo("hub-project-billing",
-    project=hub_project.project_id,
-    billing_account=billing_account_id,
-    opts=pulumi.ResourceOptions(depends_on=[hub_project])
-)
-
-# --- 3. Enable Required APIs on the Hub Project ---
+# --- 2. Enable Required APIs on the Hub Project ---
 # We enable APIs here that are needed to manage resources within this Hub project.
 apis = [
     "iam.googleapis.com",
@@ -48,11 +43,11 @@ for api in apis:
         service=api,
         project=hub_project.project_id,
         disable_on_destroy=False,
-        opts=pulumi.ResourceOptions(depends_on=[project_billing])
+        opts=pulumi.ResourceOptions(depends_on=[hub_project])
     )
     enabled_apis.append(enabled_api)
 
-# --- 4. Create the Bootstrap Service Account in the Hub Project ---
+# --- 3. Create the Bootstrap Service Account in the Hub Project ---
 bootstrap_sa = gcp.serviceaccount.Account("bootstrap-sa",
     account_id=bootstrap_sa_id,
     display_name="Organization CI/CD Bootstrap Service Account",
@@ -60,7 +55,7 @@ bootstrap_sa = gcp.serviceaccount.Account("bootstrap-sa",
     opts=pulumi.ResourceOptions(depends_on=enabled_apis)
 )
 
-# --- 5. Grant Organization-Level Permissions to the Bootstrap SA ---
+# --- 4. Grant Organization-Level Permissions to the Bootstrap SA ---
 # These roles allow the SA to create new projects and manage billing/IAM for them.
 org_level_roles = [
     "roles/resourcemanager.projectCreator",
@@ -77,7 +72,7 @@ for role in org_level_roles:
         member=pulumi.Output.concat("serviceAccount:", bootstrap_sa.email)
     )
 
-# --- 6. Create the Workload Identity Federation Pool and Provider ---
+# --- 5. Create the Workload Identity Federation Pool and Provider ---
 wif_pool = gcp.iam.WorkloadIdentityPool("wif-pool",
     workload_identity_pool_id=wif_pool_id,
     display_name="GitHub Actions WIF Pool",
@@ -104,7 +99,7 @@ wif_provider = gcp.iam.WorkloadIdentityPoolProvider("wif-provider",
     opts=pulumi.ResourceOptions(depends_on=[wif_pool])
 )
 
-# --- 7. Bind WIF to the Bootstrap Service Account ---
+# --- 6. Bind WIF to the Bootstrap Service Account ---
 # This is the crucial step that allows GitHub Actions to impersonate the Bootstrap SA.
 gcp.serviceaccount.IAMMember("wif-bootstrap-sa-binding",
     service_account_id=bootstrap_sa.name, # This is the full name of the SA resource
