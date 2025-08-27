@@ -1,2 +1,11 @@
-pulumi==3.190.0
-pulumi-gcp==8.40.0
+Arpeggio==2.0.2
+attrs==25.3.0
+debugpy==1.8.16
+dill==0.4.0
+grpcio==1.74.0
+parver==0.5
+protobuf==5.29.5
+pulumi==3.191.0
+pulumi_gcp==8.41.1
+PyYAML==6.0.2
+semver==3.0.4

@@ -20,7 +20,6 @@ wif_pool_id = "github-pool"
 wif_provider_id = "github-provider"
 
 # --- 1. Create the Hub GCP Project & Link to Billing ---
-# The billing_account is specified directly during project creation.
 hub_project = gcp.organizations.Project("hub-project",
     project_id=hub_project_id,
     name="Engineering Service Hub",
@@ -29,7 +28,6 @@ hub_project = gcp.organizations.Project("hub-project",
 )
 
 # --- 2. Enable Required APIs on the Hub Project ---
-# We enable APIs here that are needed to manage resources within this Hub project.
 apis = [
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
@@ -55,21 +53,21 @@ bootstrap_sa = gcp.serviceaccount.Account("bootstrap-sa",
     opts=pulumi.ResourceOptions(depends_on=enabled_apis)
 )
 
-# --- 4. Grant Organization-Level Permissions to the Bootstrap SA ---
-# These roles allow the SA to create new projects and manage billing/IAM for them.
-org_level_roles = [
+# --- 4. Grant Folder-Level Permissions to the Bootstrap SA ---
+# Note: The billing.user role is granted manually as a separate step.
+folder_level_roles = [
     "roles/resourcemanager.projectCreator",
-    "roles/billing.user",
     "roles/iam.workloadIdentityPoolAdmin",
     "roles/iam.serviceAccountAdmin",
     "roles/serviceusage.serviceUsageAdmin",
 ]
 
-for role in org_level_roles:
-    gcp.organizations.IAMMember(f"bootstrap-sa-org-binding-{role.replace('.', '-')}",
-        org_id=folder_id, # Assuming we are granting roles at the folder level
+for role in folder_level_roles:
+    gcp.folder.IAMMember(f"bootstrap-sa-folder-binding-{role.replace('.', '-')}",
+        folder=pulumi.Output.concat("folders/", folder_id),
         role=role,
-        member=pulumi.Output.concat("serviceAccount:", bootstrap_sa.email)
+        member=pulumi.Output.concat("serviceAccount:", bootstrap_sa.email),
+        opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa])
     )
 
 # --- 5. Create the Workload Identity Federation Pool and Provider ---
@@ -93,20 +91,17 @@ wif_provider = gcp.iam.WorkloadIdentityPoolProvider("wif-provider",
         "attribute.actor": "assertion.actor",
         "attribute.repository": "assertion.repository",
     },
-    # This condition restricts which GitHub repos can get a token.
-    # We scope it to the entire specified GitHub organization.
-    attribute_condition=f"attribute.repository.starts_with('repos/{github_org}/')",
+    attribute_condition=pulumi.Output.format("attribute.repository.startsWith('{0}/')", github_org),
     opts=pulumi.ResourceOptions(depends_on=[wif_pool])
 )
 
 # --- 6. Bind WIF to the Bootstrap Service Account ---
-# This is the crucial step that allows GitHub Actions to impersonate the Bootstrap SA.
 gcp.serviceaccount.IAMMember("wif-bootstrap-sa-binding",
-    service_account_id=bootstrap_sa.name, # This is the full name of the SA resource
+    service_account_id=bootstrap_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=pulumi.Output.concat(
         "principalSet://iam.googleapis.com/",
-        wif_pool.name.apply(lambda name: name.replace("/", "/locations/global/workloadIdentityPools/")),
+        wif_pool.name, # Use the direct output from the wif_pool resource
         f"/attribute.repository_owner/{github_org}"
     ),
     opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa, wif_provider])
@@ -115,4 +110,5 @@ gcp.serviceaccount.IAMMember("wif-bootstrap-sa-binding",
 # --- Outputs ---
 pulumi.export("hub_project_id", hub_project.project_id)
 pulumi.export("bootstrap_sa_email", bootstrap_sa.email)
+pulumi.export("workload_identity_pool_id", wif_pool.workload_identity_pool_id)
 pulumi.export("workload_identity_provider_name", wif_provider.name)

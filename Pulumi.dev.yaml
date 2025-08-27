@@ -3,4 +3,5 @@ config:
   engineering-service-hub:billing_account_id: 01D2DD-61D2EA-235A62 # The billing account to associate with the project
   engineering-service-hub:folder_id: '128277073508' # The numeric ID of the parent folder
   engineering-service-hub:github_org: noemaresearch
+  gcp:project: engineering-service-hub
 encryptionsalt: v1:2fxrxhv0Ya8=:v1:2YvayjBPxZHVPrze:DXmerh+aeQOg3QIgdm3u3K4KDrjBaQ==
