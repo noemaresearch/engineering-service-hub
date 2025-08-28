@@ -13,6 +13,7 @@ folder_id = config.require("folder_id")
 
 # GitHub organization to trust for Workload Identity Federation.
 github_org = config.require("github_org")
+pulumi_state_bucket = config.require("pulumi_state_bucket")
 
 # --- Resource Naming ---
 bootstrap_sa_id = "engineering-service-org-sa"
@@ -33,9 +34,11 @@ apis = [
     "cloudresourcemanager.googleapis.com",
     "iamcredentials.googleapis.com",
     "sts.googleapis.com",
+    "billingbudgets.googleapis.com",
+    "artifactregistry.googleapis.com",
 ]
 
-enabled_apis = []
+enabled_apis = {}
 for api in apis:
     enabled_api = gcp.projects.Service(f"enable-{api.split('.')[0]}-api",
         service=api,
@@ -43,14 +46,14 @@ for api in apis:
         disable_on_destroy=False,
         opts=pulumi.ResourceOptions(depends_on=[hub_project])
     )
-    enabled_apis.append(enabled_api)
+    enabled_apis[api] = enabled_api
 
 # --- 3. Create the Bootstrap Service Account in the Hub Project ---
 bootstrap_sa = gcp.serviceaccount.Account("bootstrap-sa",
     account_id=bootstrap_sa_id,
     display_name="Organization CI/CD Bootstrap Service Account",
     project=hub_project.project_id,
-    opts=pulumi.ResourceOptions(depends_on=enabled_apis)
+    opts=pulumi.ResourceOptions(depends_on=list(enabled_apis.values()))
 )
 
 # --- 4. Grant Folder-Level Permissions to the Bootstrap SA ---
@@ -75,7 +78,7 @@ wif_pool = gcp.iam.WorkloadIdentityPool("wif-pool",
     workload_identity_pool_id=wif_pool_id,
     display_name="GitHub Actions WIF Pool",
     project=hub_project.project_id,
-    opts=pulumi.ResourceOptions(depends_on=enabled_apis)
+    opts=pulumi.ResourceOptions(depends_on=list(enabled_apis.values()))
 )
 
 wif_provider = gcp.iam.WorkloadIdentityPoolProvider("wif-provider",
@@ -107,8 +110,48 @@ gcp.serviceaccount.IAMMember("wif-bootstrap-sa-binding",
     opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa, wif_provider])
 )
 
+# Allow the bootstrap SA to mint tokens for itself, which is required for WIF impersonation chains.
+bootstrap_sa_token_creator_binding = gcp.serviceaccount.IAMMember(
+    "bootstrap-sa-token-creator-binding",
+    service_account_id=bootstrap_sa.name,
+    role="roles/iam.serviceAccountTokenCreator",
+    member=pulumi.Output.format("serviceAccount:{0}", bootstrap_sa.email),
+    opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa])
+)
+
+# --- Central Artifact Registry ---
+artifact_repo = gcp.artifactregistry.Repository("hub-artifact-registry",
+    repository_id="hub-shared-images",
+    format="DOCKER",
+    location="europe-west2", # Match our primary region
+    description="Central Docker repository for all engineering services and agents.",
+    project=hub_project.project_id,
+    opts=pulumi.ResourceOptions(depends_on=[enabled_apis["artifactregistry.googleapis.com"]])
+)
+
+# Grant the bootstrap SA permission to write to the central artifact registry.
+artifact_repo_writer_binding = gcp.artifactregistry.RepositoryIamMember("bootstrap-sa-artifact-repo-writer",
+    project=hub_project.project_id,
+    location=artifact_repo.location,
+    repository=artifact_repo.name,
+    role="roles/artifactregistry.writer",
+    member=pulumi.Output.concat("serviceAccount:", bootstrap_sa.email),
+    opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa, artifact_repo])
+)
+
+# --- Grant Storage Admin Role to Bootstrap SA on the Pulumi State Bucket ---
+bucket_iam_binding = gcp.storage.BucketIAMMember("bootstrap-sa-pulumi-state-bucket-admin",
+    bucket=pulumi_state_bucket,
+    role="roles/storage.objectAdmin",
+    member=pulumi.Output.concat("serviceAccount:", bootstrap_sa.email),
+    opts=pulumi.ResourceOptions(depends_on=[bootstrap_sa])
+)
+
+
 # --- Outputs ---
 pulumi.export("hub_project_id", hub_project.project_id)
 pulumi.export("bootstrap_sa_email", bootstrap_sa.email)
 pulumi.export("workload_identity_pool_id", wif_pool.workload_identity_pool_id)
 pulumi.export("workload_identity_provider_name", wif_provider.name)
+pulumi.export("central_artifact_registry_id", artifact_repo.repository_id)
+pulumi.export("central_artifact_registry_location", artifact_repo.location)
